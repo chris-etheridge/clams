@@ -1,14 +1,30 @@
 # clams
 
-A Clojure library designed to ... well, that part is up to you.
+A simple library to access [ClamAV](https://www.clamav.net/) from Clojure.
+
+## Description
+
+`clams` is a simple Clojure library, that provides idiomatic access, to ClamAV 
+running on a server. This allows you to scan files with ClamAV, to make sure
+they are not malicious.
 
 ## Usage
 
-FIXME
+First, add `clams ["X.X.X"]` to your `project.clj`, where `"X.X.X"` is the current version.
+
+Then use it as follows:
+
+```clj
+  (ns my-great-app.core
+    (:require [clams.core :as clams]))
+    
+  (clams/scan-file file)
+  
+  (clams/scan-many seq-of-files)
+```
+
+More to follow. 
 
 ## License
 
-Copyright © 2017 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+Take a look at the `LICENSE` file in the root of this repository.
