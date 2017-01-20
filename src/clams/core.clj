@@ -1,9 +1,5 @@
 (ns clams.core
-  (:require #_[cognician.config :as config]
-            #_ [cognician.log :as log]
-            #_ [cognician.semaphore :as semaphore]
-            #_ [cognician.server.user :as user]
-            [snake.core :as snake])
+  (:require [snake.core :as snake])
   (:import fi.solita.clamav.ClamAVClient
            [java.io BufferedWriter File FileInputStream FileWriter]
            java.text.SimpleDateFormat))
@@ -25,12 +21,12 @@
 
 (defonce *av-client (atom nil))
 
-(defn client
-  ([] (client config/CLAM-AV-HOST config/CLAM-AV-PORT))
-  ([host port]
-   (if @*av-client
-     @*av-client
-     (reset! *av-client (ClamAVClient. host port)))))
+(defn client [config]
+  (if @*av-client
+    @*av-client
+    (let [host (:clams/host config)
+          port (Integer/parseInt (:clams/port config))]
+      (reset! *av-client (ClamAVClient. host port)))))
 
 (defn scan-reply [reply]
   (let [r (String. reply)]
@@ -53,29 +49,11 @@
 (defn scan [client is]
   (.scan client is))
 
-(defn context->user [context]
-  (let [context' (user/with-context context)
-        user-fn  (some-fn :user/uuid
-                          :user
-                          :user/email
-                          :session-uuid)
-        user     (user-fn context')]
-    (cond
-      (string? user) user
-      (number? user) user
-      :else          (:user/uuid user))))
-
-(defn prepare-semaphore-data [context data]
-  (let [user (context->user context)]
-    (-> data
-        (update :timestamp pretty-date)
-        (update :original-file (memfn getName))
-        (assoc :user-uuid user))))
-
-(defn upload-failed-file [file context]
-  (let [user (context->user context)
-        date (pretty-date (now) "yyyy-MM-dd HH:mm:ss")
-        name (str user "/" (str date "__" (.getName file)))]
+(defn upload-failed-file [file context config]
+  (let [bucket  (:clams/bucket config)
+        name-fn (:clams/name-fn config)
+        date    (pretty-date (now) "yyyy-MM-dd HH:mm:ss")
+        name    (str (name-fn result config context) "/" (str date "__" (.getName file)))]
     (log/info :upload-failed-file name)
     (snake/upload! config/S3-QUARANTINED-MEDIA-BUCKET name file)))
 
@@ -90,11 +68,13 @@
    `report-email` -> email address to send to.
 
    Will save a pending message for `semaphore` to process."
-  [result context report-email]
-  (log/warn "CLAMAV: failed scan!" :scan-result result)
-  (->> result
-       (prepare-semaphore-data context)
-       (semaphore/save-pending-message! "clamav-report"))
+  [result context config]
+  (let [error-fn  (or (:clams/error-fn config)
+                      (partial log/warn))
+        report-fn (or (:clams/report-fn config)
+                      (partial log/error))])
+  (error-fn result config)
+  (report-fn result config)
   result)
 
 (defn scan-file
@@ -107,18 +87,15 @@
    `:message`       -> a message that can be shown to the user.
 
    Note: when `:clean?` is nil, then the file was either nil or had no content."
-  [file]
-  (-> (if config/PRODUCTION?
-        (let [client (client)]
-          (if (< 0 (.length file))
-            (assoc (->> file
-                        file->byte-arr
-                        (scan client)
-                        (parse-reply client)))
-            {:clean?  nil
-             :message "Empty or no file given."}))
-        {:clean?  true
-         :message "File scanned successfully! (Scanning disabled in staging / testing)"})
+  [file context config]
+  (-> (let [client (client config)]
+        (if (< 0 (.length file))
+          (assoc (->> file
+                      file->byte-arr
+                      (scan client)
+                      (parse-reply client)))
+          {:clean?  nil
+           :message "Empty or no file given."}))
       (merge {:timestamp     (now)
               :original-file file})))
 
@@ -130,13 +107,12 @@
 
    Optional email can be given, which is where the report is sent to. Defaults
    `config/CLAM-AV-REPORT-EMAIL`."
-  ([file context] (scan-with-report! file context config/CLAM-AV-REPORT-EMAIL))
-  ([file context report-email]
-   (let [result (assoc (scan-file file) :report-email report-email)]
-     (when (not (:clean? result))
-       (report-error result context report-email)
-       (upload-failed-file file context))
-     result)))
+  [file context config]
+  (let [result (assoc (scan-file file) :report-email report-email)]
+    (when (not (:clean? result))
+      (report-error result context config)
+      (upload-failed-file file context config))
+    result))
 
 (defn new-report [files]
   {:found-files []
@@ -145,7 +121,7 @@
 
 (defn scan-many-with-report!
   "Scans a `seq` of files, and gives one report of all files scanned at the end."
-  [files]
+  [files context config]
   (loop [fs      files
          *report (atom (new-report files))]
     (let [file   (first fs)
