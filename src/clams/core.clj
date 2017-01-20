@@ -55,7 +55,7 @@
         date    (pretty-date (now) "yyyy-MM-dd HH:mm:ss")
         name    (str (name-fn result config context) "/" (str date "__" (.getName file)))]
     (log/info :upload-failed-file name)
-    (snake/upload! config/S3-QUARANTINED-MEDIA-BUCKET name file)))
+    (snake/upload! bucket name file)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Public functions
@@ -137,8 +137,7 @@
   (let [file (java.io.File/createTempFile "filename" ".txt")
         bw   (BufferedWriter. (FileWriter. file))]
     (.write bw "Some ccontent.")
-    (.close bw)
-    (prepare-semaphore-data (scan-file file)))
+    (.close bw))
 
   (let [files (take 10 (repeatedly #(java.io.File/createTempFile (str "file-#" (rand-int 100)) ".txt")))]
     (scan-many-with-report! files))
