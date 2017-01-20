@@ -1,4 +1,4 @@
-(defproject clams "0.0.1-SNAPSHOT"
+(defproject clams "0.0.2"
   :description "Access to ClamAV from Clojure."
   :url "https://www.github.com/chris-etheridge/clams"
   :license {:name "Eclipse Public License"
